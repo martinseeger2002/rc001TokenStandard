@@ -6,6 +6,7 @@ from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
 from bs4 import BeautifulSoup
 import time
 import configparser
+import os
 
 # Connect to Bitcoin RPC
 rpc_user = "1234"
@@ -37,6 +38,9 @@ def update_last_block_height(block_height):
 # Function to decode hex to base64
 def hex_to_base64(hex_str):
     try:
+        if len(hex_str) % 2 != 0:
+            print("Odd-length hex string detected. Skipping transaction.")
+            return None
         return base64.b64encode(binascii.unhexlify(hex_str)).decode('utf-8')
     except binascii.Error as e:
         print(f"Error decoding hex to base64: {e}")
@@ -54,6 +58,9 @@ def base64_to_text(base64_str):
 # Function to convert hex to ASCII
 def hex_to_ascii(hex_string):
     try:
+        if len(hex_string) % 2 != 0:
+            print("Odd-length hex string detected. Skipping transaction.")
+            return None
         return binascii.unhexlify(hex_string).decode('ascii')
     except Exception as e:
         print(f"Error converting hex to ASCII: {e}")
@@ -99,10 +106,10 @@ def process_subsequent_tx(asm_data):
 
     return data_string, False
 
-# Function to check if trait_index is valid
-def is_valid_trait_index(trait_index, collection_name):
-    # Split the trait_index into two-digit segments
-    segments = [trait_index[i:i+2] for i in range(0, len(trait_index), 2)]
+# Function to check if sn is valid
+def is_valid_sn(sn, collection_name):
+    # Split the sn into two-digit segments
+    segments = [sn[i:i+2] for i in range(0, len(sn), 2)]
     print(f"Segments: {segments}")  # Debugging output
     
     # Load the configuration file
@@ -112,7 +119,7 @@ def is_valid_trait_index(trait_index, collection_name):
     
     # Check each segment against the valid range
     for i, segment in enumerate(segments):
-        range_key = f'trait_index_{i}'
+        range_key = f'sn_index_{i}'
         if range_key in config['DEFAULT']:
             valid_range = config['DEFAULT'][range_key].split('-')
             print(f"Checking segment {segment} against range {valid_range}")  # Debugging output
@@ -144,26 +151,32 @@ def process_transaction(txid):
     mime_type = None
     inscription_address = None
 
+    # Extract the address from the transaction outputs
+    for vout in decoded_tx['vout']:
+        if 'scriptPubKey' in vout and 'addresses' in vout['scriptPubKey']:
+            inscription_address = vout['scriptPubKey']['addresses'][0]
+            break
+
     for vin in decoded_tx['vin']:
         if 'scriptSig' in vin and 'asm' in vin['scriptSig']:
             asm_data = vin['scriptSig']['asm'].split()
             if asm_data[0] == '6582895':
                 if is_genesis:
                     new_data_string, mime_type, end_of_data = process_genesis_tx(asm_data)
+                    if new_data_string is None:
+                        print("Skipping transaction due to invalid data.")
+                        return
                     data_string += new_data_string
                     is_genesis = False
                 else:
                     new_data_string, end_of_data = process_subsequent_tx(asm_data)
+                    if new_data_string is None:
+                        print("Skipping transaction due to invalid data.")
+                        return
                     data_string += new_data_string
 
                 if end_of_data:
                     break
-
-    # Extract the address from the transaction outputs
-    for vout in decoded_tx['vout']:
-        if 'scriptPubKey' in vout and 'addresses' in vout['scriptPubKey']:
-            inscription_address = vout['scriptPubKey']['addresses'][0]
-            break
 
     if data_string:
         html_data_base64 = hex_to_base64(data_string)
@@ -175,17 +188,73 @@ def process_transaction(txid):
                 # Use BeautifulSoup to parse the HTML content
                 soup = BeautifulSoup(html_data_text, 'html.parser')
                 
+                # Check for the 'deploy' operation
+                op_meta = soup.find('meta', attrs={'name': 'op', 'content': 'deploy'})
+                if op_meta:
+                    # Extract title
+                    title_tag = soup.find('title')
+                    title = title_tag.string if title_tag else 'Untitled'
+                    
+                    # Extract JSON data
+                    json_script = soup.find('script', attrs={'type': 'application/json', 'id': 'json-data'})
+                    if json_script and json_script.string:
+                        json_string = json_script.string.strip()
+                        print(f"Extracted JSON string before cleaning: {repr(json_string)}")  # Debugging output
+                        
+                        # Replace non-breaking spaces with regular spaces
+                        json_string = json_string.replace('\xa0', ' ')
+                        print(f"Extracted JSON string after cleaning: {repr(json_string)}")  # Debugging output
+                        
+                        try:
+                            json_data = json.loads(json_string)
+                            sn_ranges = json_data.get('sn', [])
+                            mint_address = json_data.get('mint_address', 'Unknown')
+                            mint_price = json_data.get('mint_price', 'Unknown')
+                            parent_inscription_id = json_data.get('parent_inscription_id', 'Unknown')
+                            
+                            # Create configuration file
+                            config_path = f'./conf/{title}.conf'
+                            with open(config_path, 'w') as config_file:
+                                config_file.write('[DEFAULT]\n')
+                                config_file.write(f'mint_address: {mint_address}\n')
+                                config_file.write(f'mint_price: {mint_price}\n')
+                                config_file.write(f'parent_inscription_id: {parent_inscription_id}\n')
+                                config_file.write(f'deploy_txid: {txid}\n')
+                                config_file.write(f'deploy_address: {inscription_address}\n')
+                                for i, sn in enumerate(sn_ranges):
+                                    config_file.write(f'sn_index_{i}: {sn["range"]}\n')
+                            
+                            print(f"Configuration file created at {config_path}")
+                        except json.JSONDecodeError as e:
+                            print(f"Error parsing JSON: {e}")
+                            return
+                    else:
+                        print("No valid JSON data found.")
+                        return
+
+                # Existing mint operation handling
+                op_meta = soup.find('meta', attrs={'name': 'op', 'content': 'mint'})
+                if not op_meta:
+                    print("Operation is not 'mint'. Skipping transaction.")
+                    return
+                
                 # Extract title
                 title_tag = soup.find('title')
                 title = title_tag.string if title_tag else 'Untitled'
                 
-                # Extract trait_index
-                trait_index_meta = soup.find('meta', attrs={'name': 'trait_index'})
-                trait_index = trait_index_meta['content'] if trait_index_meta else 'Unknown'
+                # Check if the configuration file exists
+                config_path = f'./conf/{title}.conf'
+                if not os.path.exists(config_path):
+                    print(f"Configuration file {config_path} does not exist. Skipping transaction.")
+                    return
                 
-                # Check if the trait_index is valid
-                if not is_valid_trait_index(trait_index, title):
-                    print(f"Invalid trait_index: {trait_index}")
+                # Extract serial number (sn)
+                sn_meta = soup.find('meta', attrs={'name': 'sn'})
+                sn = sn_meta['content'] if sn_meta else 'Unknown'
+                
+                # Check if the sn is valid
+                if not is_valid_sn(sn, title):
+                    print(f"Invalid serial number: {sn}")
                     return
                 
                 # Create or connect to SQLite database
@@ -195,17 +264,17 @@ def process_transaction(txid):
                 c.execute('''CREATE TABLE IF NOT EXISTS items (
                                 item_no INTEGER PRIMARY KEY AUTOINCREMENT,
                                 inscription_id TEXT UNIQUE,
-                                trait_id TEXT,
+                                sn TEXT,
                                 inscription_status TEXT,
                                 inscription_address TEXT)''')
                 
-                # Check if inscription_id or trait_id already exists
+                # Check if inscription_id or sn already exists
                 inscription_id = f"{txid}i0"
-                c.execute('SELECT * FROM items WHERE inscription_id=? OR trait_id=?', (inscription_id, trait_index))
+                c.execute('SELECT * FROM items WHERE inscription_id=? OR sn=?', (inscription_id, sn))
                 if not c.fetchone():
                     # Insert new entry
-                    c.execute('INSERT INTO items (inscription_id, trait_id, inscription_status, inscription_address) VALUES (?, ?, ?, ?)',
-                              (inscription_id, trait_index, 'minted', inscription_address))
+                    c.execute('INSERT INTO items (inscription_id, sn, inscription_status, inscription_address) VALUES (?, ?, ?, ?)',
+                              (inscription_id, sn, 'minted', inscription_address))
                     conn.commit()
                 conn.close()
 
@@ -231,8 +300,8 @@ while True:
         # Update last_block_height to the current block height
         last_block_height = current_block_height
 
-        # Wait for 2 minutes before checking for new blocks
-        time.sleep(120)
+        # Wait for 30 sec before checking for new blocks
+        time.sleep(30)
     except (BrokenPipeError, JSONRPCException) as e:
         print(f"RPC error: {e}")
         time.sleep(60)  # Wait before retrying

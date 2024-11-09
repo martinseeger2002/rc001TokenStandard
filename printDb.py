@@ -25,5 +25,5 @@ def read_database(db_name):
 
 if __name__ == "__main__":
     # Replace 'your_db_name' with the actual name of your database (without the .db extension)
-    db_name = 'RC001'
+    db_name = "where's my RC001?"
     read_database(db_name)
