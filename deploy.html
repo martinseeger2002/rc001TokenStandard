@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta name="p" content="rc001">  // the protocol rc001
+    <meta name="op" content="deploy"> // the operation.
+    <title>where's my RC001?</title> // the title of the collection.
+</head>
+<body>
+    <script type="application/json" id="json-data">
+        {
+            "mint_address": "Dogecoinaddress",   // the address that will receive mint amount.
+            "mint_price": "1",                   // the price of the mint amount.
+            "parent_inscription_id": "<txid>i0", // the inscriptionid of the parent
+            "trait": [
+                {"range": "00-05"},              // the range of the trait_index_0
+                {"range": "00-28"},              // the range of the trait_index_1
+                {"range": "00-12"}               // the range of the trait_index_2
+            ]
+        }
+    </script>
+</body>
+</html>
