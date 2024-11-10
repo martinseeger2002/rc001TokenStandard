@@ -25,14 +25,14 @@ def connect_to_rpc():
 
 # Load last scanned block height
 try:
-    with open('./db/last_block_scaned.json', 'r') as f:
+    with open('./last_block_scaned.json', 'r') as f:
         last_block_height = json.load(f).get('last_block_height', 0)
 except FileNotFoundError:
     last_block_height = 0
 
 # Function to update last scanned block height
 def update_last_block_height(block_height):
-    with open('./db/last_block_scaned.json', 'w') as f:
+    with open('./last_block_scaned.json', 'w') as f:
         json.dump({'last_block_height': block_height}, f)
 
 # Function to decode hex to base64
@@ -114,7 +114,7 @@ def is_valid_sn(sn, collection_name):
     
     # Load the configuration file
     config = configparser.ConfigParser()
-    config_path = f'./conf/{collection_name}.conf'
+    config_path = f'./{collection_name}.conf'
     config.read(config_path)
     
     # Check each segment against the valid range
@@ -213,12 +213,14 @@ def process_transaction(txid):
                             parent_inscription_id = json_data.get('parent_inscription_id', 'Unknown')
                             
                             # Create configuration file
-                            config_path = f'./conf/{title}.conf'
+                            config_path = f'./{title}.conf'
                             with open(config_path, 'w') as config_file:
                                 config_file.write('[DEFAULT]\n')
                                 config_file.write(f'mint_address: {mint_address}\n')
                                 config_file.write(f'mint_price: {mint_price}\n')
                                 config_file.write(f'parent_inscription_id: {parent_inscription_id}\n')
+                                config_file.write(f'emblem_inscription_id: {json_data.get("emblem_inscription_id", "Unknown")}\n')
+                                config_file.write(f'website: {json_data.get("website", "Unknown")}\n')
                                 config_file.write(f'deploy_txid: {txid}\n')
                                 config_file.write(f'deploy_address: {inscription_address}\n')
                                 for i, sn in enumerate(sn_ranges):
@@ -243,7 +245,7 @@ def process_transaction(txid):
                 title = title_tag.string if title_tag else 'Untitled'
                 
                 # Check if the configuration file exists
-                config_path = f'./conf/{title}.conf'
+                config_path = f'./{title}.conf'
                 if not os.path.exists(config_path):
                     print(f"Configuration file {config_path} does not exist. Skipping transaction.")
                     return
@@ -257,8 +259,25 @@ def process_transaction(txid):
                     print(f"Invalid serial number: {sn}")
                     return
                 
+                # Extract parent_txid from the script tag
+                script_tag = soup.find('script', src=True)
+                if script_tag:
+                    script_src = script_tag['src']
+                    parent_txid_from_script = script_src.split('/')[-1]
+                else:
+                    print("No script tag found. Skipping transaction.")
+                    return
+                
+                # Check if parent_txid from script matches parent_txid in the config file
+                config = configparser.ConfigParser()
+                config.read(config_path)
+                parent_txid = config['DEFAULT'].get('parent_inscription_id', 'Unknown')
+                if parent_txid_from_script != parent_txid:
+                    print(f"Parent txid from script {parent_txid_from_script} does not match parent_txid {parent_txid}. Skipping transaction.")
+                    return
+                
                 # Create or connect to SQLite database
-                db_path = f'./db/{title}.db'
+                db_path = f'./{title}.db'
                 conn = sqlite3.connect(db_path)
                 c = conn.cursor()
                 c.execute('''CREATE TABLE IF NOT EXISTS items (
@@ -270,12 +289,32 @@ def process_transaction(txid):
                 
                 # Check if inscription_id or sn already exists
                 inscription_id = f"{txid}i0"
-                c.execute('SELECT * FROM items WHERE inscription_id=? OR sn=?', (inscription_id, sn))
-                if not c.fetchone():
+                c.execute('SELECT * FROM items WHERE sn=?', (sn,))
+                existing_entry = c.fetchone()
+
+                if existing_entry and existing_entry[1] is None:
+                    # Update the existing entry with the new inscription_id
+                    c.execute('UPDATE items SET inscription_id=?, inscription_status=?, inscription_address=? WHERE sn=?',
+                              (inscription_id, 'minted', inscription_address, sn))
+                else:
                     # Insert new entry
                     c.execute('INSERT INTO items (inscription_id, sn, inscription_status, inscription_address) VALUES (?, ?, ?, ?)',
                               (inscription_id, sn, 'minted', inscription_address))
-                    conn.commit()
+
+                # Reorder the table to ensure minted items are listed first
+                c.execute('SELECT * FROM items WHERE inscription_status="minted" ORDER BY item_no')
+                minted_items = c.fetchall()
+
+                c.execute('SELECT * FROM items WHERE inscription_status!="minted" ORDER BY item_no')
+                non_minted_items = c.fetchall()
+
+                # Clear the table and reinsert items in the correct order
+                c.execute('DELETE FROM items')
+                for item in minted_items + non_minted_items:
+                    c.execute('INSERT INTO items (inscription_id, sn, inscription_status, inscription_address) VALUES (?, ?, ?, ?)',
+                              (item[1], item[2], item[3], item[4]))
+
+                conn.commit()
                 conn.close()
 
 # Main loop to continuously scan for new blocks
