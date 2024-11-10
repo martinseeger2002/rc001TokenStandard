@@ -1,0 +1,73 @@
+How to deploy a rc001 NFT collection.
+
+1. Inscribe the pngs with transparancy of each of the traits.
+    Keep track of each trait name and inscription id.
+
+2. Add all the trait names and inscription ids to the NFTparent.js file.
+    The traits will be expressed in your NFT from index [0] to [n].
+    Make a new trate index for each trait type from the background index [0] to the accessorys index [n].
+    Make a new trait index for each trait. [00] to [99].
+    look at the NFTparent.js file for the correct format.
+    {
+        "inscriptionId": "ba29aa4c32893c43d0a648722f03d14210a54346ca065434d8aa0ed8ac7643bci0", // this is the inscription id of the trait.
+        "name": "Screamin' Green", // this is the name of the trait.
+        "traitIndex": "0:00" // this is the index of the trait. The first 0 refers to the two digit sn index. The second 00 refers to the trait index.
+    },
+    For rarity add multipule traits to the trait indexs. [00] to [99]. If you add a trait once it will be 1% of the total supply. If you add it twice it will be 2% of the total supply.
+
+3. add trait type name to the NFTparent.js file.
+    Line 218 in the current file. const labels = ['Background Color:', 'Body:', 'Face:'];
+    Add a new label for each trait type and index.
+
+4. Inscribe the NFTparent.js file.
+    Keep track of the inscription id.
+
+5. Update the deploy.html with the new collection name in the title tag and the json-data.
+        {
+            "mint_address": "<your mint address>", // the address that will receive mint amount.    
+            "mint_price": "<amount to sent to the mint address>", // the price of the mint amount.
+            "parent_inscription_id": "<parent_inscription_id>", // the inscriptionid of the parent
+            "emblem_inscription_id": "<emblem_inscription_id>", // the inscriptionid of the emblem
+            "website": "<website>", // the website of the collection
+            "sn": [
+                {"range": "00-10"}, // the range of the sn_index_0
+                {"range": "00-99"}, // the range of the sn_index_1
+                {"range": "00-99"}, // the range of the sn_index_2
+                {"range": "01-99"} // the range of the sn_index_3
+            ]
+        }
+
+6. Inscribe the deploy.html file.
+    This deploy html file will be used to start the indexing process.
+
+7. Mint your collection.
+    Start minting your collection by clicking the Mint Collection button at blockchainplugz.com/mintpad
+    Enter the collection name.
+    Copy the html output.
+    Inscribe the html output as a html file mime type.
+    This html will inscription will ba automatly added to the collection database.
+
+
+
+How to deploy a rc002 token.
+
+1. Inscribe the token-emblem.png file.
+    Keep track of the inscription id.
+
+2. update the tokenparent.js file with the new inscription id.
+    Line 49 const imageUrl = `/content/<emblem_inscription_id>`; // put the emblem inscription id here.
+
+3. Inscribe the tokenparent.js file.
+    Keep track of the inscription id.
+
+4. Update the deploy.html with the new collection name in the title tag and the json-data. 
+
+5. Inscribe the deploy.html file.
+    This deploy html file will be used to start the indexing process.
+
+6. Mint your collection.
+    Start minting your collection by clicking the Mint Collection button at blockchainplugz.com/mintpad
+    Enter the collection name.
+    Copy the html output.
+    Inscribe the html output as a html file mime type.
+    This html will inscription will ba automatly added to the collection database.
