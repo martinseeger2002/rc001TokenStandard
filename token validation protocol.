@@ -5,7 +5,6 @@ To ensure the validity of an rc001 mint token, follow this step-by-step process.
 1. Verify the Mint Token Inscription:
 
 	•	Check the Transaction:
-	•	Confirm that the mint token is the first inscription in the Dogecoin transaction. This ensures it is the primary mint token for that transaction.
 	•	Validate Metadata:
 	•	The mint token HTML should contain:
 	•	Protocol identifier: <meta name="p" content="rc001">
@@ -16,10 +15,10 @@ To ensure the validity of an rc001 mint token, follow this step-by-step process.
 
 2. Confirm the Parent Inscription:
 
-	•	Verify the Parent Inscription ID:
-	•	Extract the parent_inscription_id from the mint token HTML.
-	•	Compare it with the parent inscription ID defined in the deploy.html file.
-	•	If the IDs match, the mint token is part of the correct collection.
+	•	Verify the Parent Inscription ID and collection name:
+	•	Extract the parent_inscription_id, and collection name from the mint token HTML.
+	•	Compare it with the parent inscription ID, and collection name defined in the deploy.html file.
+	•	If the IDs, and names match, the mint token is part of the correct collection.
 
 3. Check the Serial Number (SN):
 
@@ -31,7 +30,7 @@ To ensure the validity of an rc001 mint token, follow this step-by-step process.
 
 	•	Check the Payment Output:
 	•	Retrieve the mint transaction details.
-	•	Ensure that there is an output paying the exact mint price to the specified mint address.
+	•	Ensure that there is an output paying a multiple of or the exact mint price to the specified mint address.
 	•	The mint_address and mint_price are defined in deploy.html.
 Example:
 	•	Mint price: 1 DOGE
@@ -43,19 +42,9 @@ Example:
 5. Confirm Change Output:
 
 	•	Check for Change Output:
-	•	Ensure that the input (vin) of the mint transaction includes the change output from the payment.
-	•	This indicates that any leftover balance after paying the mint price is returned to the sender.
-
-6. Validate the Linked Script (NFTparent.js):
-
-	•	Verify the NFTparent.js Script:
-	•	The mint token HTML should include a script tag linking to NFTparent.js using its inscription ID:
-
-<script src="/content/<NFTparent_inscription_id>"></script>
-
-
-	•	Ensure that the inscription ID matches the correct NFTparent.js file for this collection.
-	•	This file contains the trait data and logic used to generate the NFT.
+	•	Ensure that the input (vin) of the mint transaction includes the change output from the payment transaction.
+    If minting multiple tokens, subsequent mints must be made using the change from the previous mint transaction.
+	•	The number of valid mints is based upon the amount sent to the mint address defined in the deploy HTML.
 
 7. Confirm the Mint Token Inscription Completeness:
 
@@ -72,13 +61,10 @@ Example:
 Summary Checklist:
 
 To validate an rc001 mint token:
-	1.	Is it the first inscription in the transaction?
 	2.	Does it have valid metadata (protocol identifier, operation type, serial number, parent inscription ID)?
 	3.	Is the parent inscription ID correct?
 	4.	Is the serial number unique and within the valid range?
 	5.	Was the mint price paid correctly to the mint address?
-	6.	Is there a change output indicating leftover balance?
-	7.	Is the linked NFTparent.js inscription ID correct?
 	8.	Is the mint token HTML correctly formatted and inscribed?
 	9.	Has the mint token been verified in the collection database?
 
