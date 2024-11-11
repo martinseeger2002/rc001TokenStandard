@@ -29,7 +29,7 @@ To ensure the validity of an rc001 mint token, follow this step-by-step process.
 4. Validate the Mint Payment:
 
 	•	Check the Payment Output:
-	•	Retrieve the mint transaction details.
+	•	Retrieve the mint transaction vin details.
 	•	Ensure that there is an output paying the exact mint price to the specified mint address.
 	•	The mint_address and mint_price are defined in deploy.html.
 Example:
@@ -43,7 +43,7 @@ Example:
 
 	•	Check for Change Output:
 	•	Ensure that the input (vin) of the mint transaction includes the change output from the payment transaction.
-	•	The number of valid mints is based upon the amount sent to the mint address defined in the deploy HTML.
+	•	The valid mint is based upon the amount sent to the mint address defined in the deploy HTML.
 
 7. Confirm the Mint Token Inscription Completeness:
 
@@ -67,4 +67,4 @@ To validate an rc001 mint token:
 	8.	Is the mint token HTML correctly formatted and inscribed?
 	9.	Has the mint token been verified in the collection database?
 
-If all these checks pass, the mint token is valid, and the NFT can be considered officially minted. This process helps maintain the integrity and authenticity of the rc001 NFT collection.
+If all these checks pass, the mint token is valid, and the NFT can be considered officially minted. This process helps maintain the integrity and authenticity of the rc001 NFT protocol.
