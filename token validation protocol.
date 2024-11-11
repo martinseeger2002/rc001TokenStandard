@@ -45,13 +45,13 @@ Example:
 	•	Ensure that the input (vin) of the mint transaction includes the change output from the payment transaction.
 	•	The valid mint is based upon the amount sent to the mint address defined in the deploy HTML.
 
-7. Confirm the Mint Token Inscription Completeness:
+6. Confirm the Mint Token Inscription Completeness:
 
 	•	Ensure Proper Inscription Format:
 	•	Verify that the mint token HTML file is inscribed with the correct MIME type (text/html).
 	•	Check that all required fields are present and filled out (e.g., title, metadata tags).
 
-8. Cross-Check the Collection Database (Optional but Recommended):
+7. Cross-Check the Collection Database (Optional but Recommended):
 
 	•	Check the Collection Database:
 	•	If your collection is being indexed or tracked in a public database (e.g., Blockchain Plugz), ensure that the mint token is registered and not duplicated.
@@ -60,11 +60,11 @@ Example:
 Summary Checklist:
 
 To validate an rc001 mint token:
-	2.	Does it have valid metadata (protocol identifier, operation type, serial number, parent inscription ID)?
-	3.	Is the parent inscription ID correct?
-	4.	Is the serial number unique and within the valid range?
-	5.	Was the mint price paid correctly to the mint address?
-	8.	Is the mint token HTML correctly formatted and inscribed?
-	9.	Has the mint token been verified in the collection database?
+	1.	Does it have valid metadata (protocol identifier, operation type, serial number, parent inscription ID)?
+	2.	Is the parent inscription ID correct?
+	3.	Is the serial number unique and within the valid range?
+	4.	Was the mint price paid correctly to the mint address?
+	5.	Is the mint token HTML correctly formatted and inscribed?
+	6.	Has the mint token been verified in the collection database?
 
-If all these checks pass, the mint token is valid, and the NFT can be considered officially minted. This process helps maintain the integrity and authenticity of the rc001 NFT protocol.
+If all these checks pass, the mint token is valid, and the NFT can be considered officially minted. This process helps maintain the integrity and authenticity of the rc001 token protocol.
