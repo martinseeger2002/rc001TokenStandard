@@ -29,7 +29,7 @@ To ensure the validity of an rc001 mint token, follow this step-by-step process.
 4. Validate the Mint Payment:
 
 	•	Check the Payment Output:
-	•	Retrieve the mint transaction vin details.
+	•	Retrieve the mint transaction vout details.
 	•	Ensure that there is an output paying the exact mint price to the specified mint address.
 	•	The mint_address and mint_price are defined in deploy.html.
 Example:
