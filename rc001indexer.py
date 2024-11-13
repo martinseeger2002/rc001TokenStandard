@@ -195,6 +195,12 @@ def process_transaction(txid):
                     title_tag = soup.find('title')
                     title = title_tag.string if title_tag else 'Untitled'
                     
+                    # Check if the configuration file already exists
+                    config_path = f'./{title}.conf'
+                    if os.path.exists(config_path):
+                        print(f"Configuration file {config_path} already exists. Skipping deploy transaction.")
+                        return
+                    
                     # Extract JSON data
                     json_script = soup.find('script', attrs={'type': 'application/json', 'id': 'json-data'})
                     if json_script and json_script.string:
@@ -213,7 +219,6 @@ def process_transaction(txid):
                             parent_inscription_id = json_data.get('parent_inscription_id', 'Unknown')
                             
                             # Create configuration file
-                            config_path = f'./{title}.conf'
                             with open(config_path, 'w') as config_file:
                                 config_file.write('[DEFAULT]\n')
                                 config_file.write(f'mint_address: {mint_address}\n')
@@ -276,6 +281,21 @@ def process_transaction(txid):
                     print(f"Parent txid from script {parent_txid_from_script} does not match parent_txid {parent_txid}. Skipping transaction.")
                     return
                 
+                # Validate the mint payment
+                mint_price_sats = float(config['DEFAULT'].get('mint_price', '0'))
+                mint_price_btc = mint_price_sats / 100000000  # Convert satoshis to bitcoins
+                mint_address = config['DEFAULT'].get('mint_address', 'Unknown')
+                if mint_price_btc > 0:
+                    valid_payment = False
+                    for vout in decoded_tx['vout']:
+                        if 'value' in vout and 'scriptPubKey' in vout and 'addresses' in vout['scriptPubKey']:
+                            if vout['value'] == mint_price_btc and mint_address in vout['scriptPubKey']['addresses']:
+                                valid_payment = True
+                                break
+                    if not valid_payment:
+                        print(f"Transaction does not pay the mint price of {mint_price_btc} BTC to {mint_address}. Skipping transaction.")
+                        return
+
                 # Create or connect to SQLite database
                 db_path = f'./{title}.db'
                 conn = sqlite3.connect(db_path)
@@ -283,23 +303,26 @@ def process_transaction(txid):
                 c.execute('''CREATE TABLE IF NOT EXISTS items (
                                 item_no INTEGER PRIMARY KEY AUTOINCREMENT,
                                 inscription_id TEXT UNIQUE,
-                                sn TEXT,
+                                sn TEXT UNIQUE,
                                 inscription_status TEXT,
                                 inscription_address TEXT)''')
                 
-                # Check if inscription_id or sn already exists
-                inscription_id = f"{txid}i0"
+                # Check if sn already exists
                 c.execute('SELECT * FROM items WHERE sn=?', (sn,))
                 existing_entry = c.fetchone()
 
-                if existing_entry and existing_entry[1] is None:
-                    # Update the existing entry with the new inscription_id
-                    c.execute('UPDATE items SET inscription_id=?, inscription_status=?, inscription_address=? WHERE sn=?',
-                              (inscription_id, 'minted', inscription_address, sn))
+                if existing_entry:
+                    print(f"Serial number {sn} already exists. Skipping transaction.")
+                    return
                 else:
-                    # Insert new entry
-                    c.execute('INSERT INTO items (inscription_id, sn, inscription_status, inscription_address) VALUES (?, ?, ?, ?)',
-                              (inscription_id, sn, 'minted', inscription_address))
+                    # Determine the next item_no
+                    c.execute('SELECT COUNT(*) FROM items')
+                    next_item_no = c.fetchone()[0] + 1
+
+                    # Insert new entry with the correct item_no
+                    inscription_id = f"{txid}i0"
+                    c.execute('INSERT INTO items (item_no, inscription_id, sn, inscription_status, inscription_address) VALUES (?, ?, ?, ?, ?)',
+                              (next_item_no, inscription_id, sn, 'minted', inscription_address))
 
                 # Reorder the table to ensure minted items are listed first
                 c.execute('SELECT * FROM items WHERE inscription_status="minted" ORDER BY item_no')
@@ -310,9 +333,9 @@ def process_transaction(txid):
 
                 # Clear the table and reinsert items in the correct order
                 c.execute('DELETE FROM items')
-                for item in minted_items + non_minted_items:
-                    c.execute('INSERT INTO items (inscription_id, sn, inscription_status, inscription_address) VALUES (?, ?, ?, ?)',
-                              (item[1], item[2], item[3], item[4]))
+                for index, item in enumerate(minted_items + non_minted_items, start=1):
+                    c.execute('INSERT INTO items (item_no, inscription_id, sn, inscription_status, inscription_address) VALUES (?, ?, ?, ?, ?)',
+                              (index, item[1], item[2], item[3], item[4]))
 
                 conn.commit()
                 conn.close()
