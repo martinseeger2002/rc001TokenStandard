@@ -232,6 +232,21 @@ def process_transaction(txid):
                                     config_file.write(f'sn_index_{i}: {sn["range"]}\n')
                             
                             print(f"Configuration file created at {config_path}")
+
+                            # Initialize the database for the collection
+                            db_path = f'./{title}.db'
+                            conn = sqlite3.connect(db_path)
+                            c = conn.cursor()
+                            c.execute('''CREATE TABLE IF NOT EXISTS items (
+                                            item_no INTEGER PRIMARY KEY AUTOINCREMENT,
+                                            inscription_id TEXT UNIQUE,
+                                            sn TEXT UNIQUE,
+                                            inscription_status TEXT,
+                                            inscription_address TEXT)''')
+                            conn.commit()
+                            conn.close()
+                            print(f"Database initialized at {db_path}")
+
                         except json.JSONDecodeError as e:
                             print(f"Error parsing JSON: {e}")
                             return
