@@ -7,12 +7,14 @@ from bs4 import BeautifulSoup
 import time
 import configparser
 import os
+import re
+from decimal import Decimal
 
 # Connect to Bitcoin RPC
 rpc_user = "1234"
 rpc_password = "pass"
 rpc_host = "localhost"
-rpc_port = "22555"
+rpc_port = "22555"  # Default port for Dogecoin
 rpc_url = f"http://{rpc_user}:{rpc_password}@{rpc_host}:{rpc_port}"
 
 # Function to establish a connection to the Bitcoin RPC server
@@ -24,11 +26,12 @@ def connect_to_rpc():
         return None
 
 # Load last scanned block height
-try:
-    with open('./last_block_scaned.json', 'r') as f:
-        last_block_height = json.load(f).get('last_block_height', 0)
-except FileNotFoundError:
-    last_block_height = 0
+def load_last_block_height():
+    try:
+        with open('./last_block_scaned.json', 'r') as f:
+            return json.load(f).get('last_block_height', 0)
+    except FileNotFoundError:
+        return 0
 
 # Function to update last scanned block height
 def update_last_block_height(block_height):
@@ -52,7 +55,6 @@ def base64_to_text(base64_str):
         return base64.b64decode(base64_str).decode('utf-8')
     except (binascii.Error, UnicodeDecodeError) as e:
         print(f"Error decoding base64 to text: {e}")
-        print(f"Problematic base64 string: {base64_str}")
         return None
 
 # Function to convert hex to ASCII
@@ -66,322 +68,322 @@ def hex_to_ascii(hex_string):
         print(f"Error converting hex to ASCII: {e}")
         return None
 
-# Function to process the genesis transaction
-def process_genesis_tx(asm_data):
-    data_string = ""
-    num_chunks = int(asm_data[1].lstrip('-'))
-    mime_type_hex = asm_data[2]
-    mime_type = hex_to_ascii(mime_type_hex)
-
-    index = 3
-    while index < len(asm_data):
-        if asm_data[index].lstrip('-').isdigit():
-            num_chunks = int(asm_data[index].lstrip('-'))
-            data_chunk = asm_data[index + 1]
-            data_string += data_chunk
-            index += 2
-
-            if num_chunks == 0:
-                return data_string, mime_type, True
-        else:
-            break
-
-    return data_string, mime_type, False
-
-# Function to process subsequent transactions
-def process_subsequent_tx(asm_data):
-    data_string = ""
-    index = 0
-    while index < len(asm_data):
-        if asm_data[index].lstrip('-').isdigit():
-            num_chunks = int(asm_data[index].lstrip('-'))
-            data_chunk = asm_data[index + 1]
-            data_string += data_chunk
-            index += 2
-
-            if num_chunks == 0:
-                return data_string, True
-        else:
-            break
-
-    return data_string, False
-
 # Function to check if sn is valid
 def is_valid_sn(sn, collection_name):
-    # Split the sn into two-digit segments
-    segments = [sn[i:i+2] for i in range(0, len(sn), 2)]
-    print(f"Segments: {segments}")  # Debugging output
-    
     # Load the configuration file
     config = configparser.ConfigParser()
-    config_path = f'./{collection_name}.conf'
+    config_path = f'./collections/{collection_name}.conf'
+    if not os.path.exists(config_path):
+        print(f"Configuration file {config_path} does not exist.")
+        return False
     config.read(config_path)
     
-    # Check each segment against the valid range
+    # Check if the entire sn is within a single range
+    if 'sn_range' in config['DEFAULT']:
+        valid_range = config['DEFAULT']['sn_range'].split('-')
+        if len(valid_range[0]) > 2 and len(valid_range[1]) > 2:
+            if valid_range[0] <= sn.zfill(len(valid_range[1])) <= valid_range[1]:
+                print(f"Serial number {sn} is within the single range {valid_range}.")
+                return True
+            else:
+                print(f"Serial number {sn} is not within the single range {valid_range}.")
+                return False
+
+    # Check if there is only one sn_index key
+    sn_index_keys = [key for key in config['DEFAULT'] if key.startswith('sn_index_')]
+    if len(sn_index_keys) == 1:
+        valid_range = config['DEFAULT'][sn_index_keys[0]].split('-')
+        if valid_range[0] <= sn.zfill(len(valid_range[1])) <= valid_range[1]:
+            print(f"Serial number {sn} is within the single range {valid_range}.")
+            return True
+        else:
+            print(f"Serial number {sn} is not within the single range {valid_range}.")
+            return False
+
+    # Check segmented ranges
+    segments = [sn[i:i+2] for i in range(0, len(sn), 2)]
     for i, segment in enumerate(segments):
         range_key = f'sn_index_{i}'
         if range_key in config['DEFAULT']:
             valid_range = config['DEFAULT'][range_key].split('-')
-            print(f"Checking segment {segment} against range {valid_range}")  # Debugging output
-            if not (valid_range[0] <= segment <= valid_range[1]):
-                print(f"Segment {segment} is out of range {valid_range}")  # Debugging output
+            padded_segment = segment.zfill(len(valid_range[1]))
+            if valid_range[0] <= padded_segment <= valid_range[1]:
+                print(f"Segment {padded_segment} of serial number {sn} is within range {valid_range}.")
+            else:
+                print(f"Segment {padded_segment} of serial number {sn} is not within range {valid_range}.")
                 return False
         else:
-            # If no range is specified for a segment, assume it's invalid
-            print(f"No range specified for segment {i}")  # Debugging output
+            print(f"Range key {range_key} not found in configuration.")
             return False
-    
     return True
 
+# Function to sanitize the collection name
+def sanitize_filename(name):
+    # Remove any character that is not alphanumeric, underscore, or hyphen
+    return re.sub(r'[^\w\-]', '', name)
+
 # Function to process transactions
-def process_transaction(txid):
-    rpc_connection = connect_to_rpc()
-    if rpc_connection is None:
+def process_transaction(tx, rpc_connection):
+    txid = tx['txid']
+
+    # Check if there is at least one vin
+    if not tx.get('vin'):
         return
 
-    try:
-        raw_tx = rpc_connection.getrawtransaction(txid)
-        decoded_tx = rpc_connection.decoderawtransaction(raw_tx)
-    except Exception as e:
-        print(f"Error processing transaction {txid}: {e}")
-        return
+    vin = tx['vin'][0]
 
-    is_genesis = True
+    # Check if 'scriptSig' and 'asm' are present in vin[0]
+    if 'scriptSig' in vin and 'asm' in vin['scriptSig']:
+        asm_data = vin['scriptSig']['asm'].split()
+        # Check if '6582895' is the first opcode
+        if asm_data and asm_data[0] == '6582895':
+            # Proceed to extract inscription data
+            data_string, mime_type = extract_inscription_data(asm_data)
+            if not data_string or not mime_type or 'text/html' not in mime_type.lower():
+                return  # Skip if no data or MIME type does not contain 'text/html'
+
+            # Decode and process the HTML data
+            html_data_base64 = hex_to_base64(data_string)
+            if not html_data_base64:
+                return
+            html_data_text = base64_to_text(html_data_base64)
+            if not html_data_text or '<meta name="p" content="rc001">' not in html_data_text:
+                return  # Skip if protocol identifier not found
+
+            # Use BeautifulSoup to parse the HTML content
+            soup = BeautifulSoup(html_data_text, 'html.parser')
+
+            # Extract the operation type
+            op_meta = soup.find('meta', attrs={'name': 'op'})
+            if op_meta and op_meta.get('content') == 'deploy':
+                handle_deploy_operation(soup, txid, tx)
+            elif op_meta and op_meta.get('content') == 'mint':
+                handle_mint_operation(soup, txid, tx)
+            else:
+                return  # Operation not 'deploy' or 'mint', skip
+    else:
+        return  # 'scriptSig' or 'asm' not in vin[0], skip transaction
+
+def extract_inscription_data(asm_data):
     data_string = ""
     mime_type = None
-    inscription_address = None
+    index = 1  # Start after '6582895'
 
-    # Extract the address from the transaction outputs
-    for vout in decoded_tx['vout']:
-        if 'scriptPubKey' in vout and 'addresses' in vout['scriptPubKey']:
-            inscription_address = vout['scriptPubKey']['addresses'][0]
+    if index >= len(asm_data):
+        return None, None
+
+    # Process genesis transaction
+    num_chunks = asm_data[index]
+    if not num_chunks.lstrip('-').isdigit():
+        return None, None
+    index += 1
+
+    if index >= len(asm_data):
+        return None, None
+
+    mime_type_hex = asm_data[index]
+    mime_type = hex_to_ascii(mime_type_hex)
+    index += 1
+
+    while index < len(asm_data):
+        part = asm_data[index]
+        if part.lstrip('-').isdigit():
+            # Number of chunks
+            index += 1
+            if index >= len(asm_data):
+                return None, None
+            data_chunk = asm_data[index]
+            data_string += data_chunk
+            index += 1
+        else:
             break
 
-    for vin in decoded_tx['vin']:
-        if 'scriptSig' in vin and 'asm' in vin['scriptSig']:
-            asm_data = vin['scriptSig']['asm'].split()
-            if asm_data[0] == '6582895':
-                if is_genesis:
-                    new_data_string, mime_type, end_of_data = process_genesis_tx(asm_data)
-                    if new_data_string is None:
-                        print("Skipping transaction due to invalid data.")
-                        return
-                    data_string += new_data_string
-                    is_genesis = False
-                else:
-                    new_data_string, end_of_data = process_subsequent_tx(asm_data)
-                    if new_data_string is None:
-                        print("Skipping transaction due to invalid data.")
-                        return
-                    data_string += new_data_string
+    return data_string, mime_type
 
-                if end_of_data:
+def handle_deploy_operation(soup, txid, tx):
+    # Extract title
+    title_tag = soup.find('title')
+    title = title_tag.string if title_tag else 'Untitled'
+    sanitized_title = sanitize_filename(title)
+    config_path = f'./collections/{sanitized_title}.conf'
+
+    if os.path.exists(config_path):
+        print(f"Configuration file {config_path} already exists. Skipping deploy transaction.")
+        return
+
+    # Extract JSON data
+    json_script = soup.find('script', attrs={'type': 'application/json', 'id': 'json-data'})
+    if json_script and json_script.string:
+        json_string = json_script.string.strip().replace('\xa0', ' ')
+        try:
+            json_data = json.loads(json_string)
+            sn_ranges = json_data.get('sn', [])
+            mint_address = json_data.get('mint_address', 'Unknown')
+            mint_price = json_data.get('mint_price', 'Unknown')
+            parent_inscription_id = json_data.get('parent_inscription_id', 'Unknown')
+
+            # Get inscription address from vout[0]
+            inscription_address = None
+            if tx['vout']:
+                vout0 = tx['vout'][0]
+                if 'scriptPubKey' in vout0 and 'addresses' in vout0['scriptPubKey']:
+                    inscription_address = vout0['scriptPubKey']['addresses'][0]
+
+            # Create configuration file
+            with open(config_path, 'w') as config_file:
+                config_file.write('[DEFAULT]\n')
+                config_file.write(f'mint_address: {mint_address}\n')
+                config_file.write(f'mint_price: {mint_price}\n')
+                config_file.write(f'parent_inscription_id: {parent_inscription_id}\n')
+                config_file.write(f'emblem_inscription_id: {json_data.get("emblem_inscription_id", "Unknown")}\n')
+                config_file.write(f'website: {json_data.get("website", "Unknown")}\n')
+                config_file.write(f'deploy_txid: {txid}\n')
+                config_file.write(f'deploy_address: {inscription_address}\n')
+                for i, sn in enumerate(sn_ranges):
+                    config_file.write(f'sn_index_{i}: {sn["range"]}\n')
+
+            print(f"Configuration file created at {config_path}")
+
+            # Initialize the database for the collection
+            db_path = f'./collections/{sanitized_title}.db'
+            conn = sqlite3.connect(db_path)
+            c = conn.cursor()
+            c.execute('''CREATE TABLE IF NOT EXISTS items (
+                            item_no INTEGER PRIMARY KEY AUTOINCREMENT,
+                            inscription_id TEXT UNIQUE,
+                            sn TEXT UNIQUE,
+                            inscription_status TEXT,
+                            inscription_address TEXT)''')
+            conn.commit()
+            conn.close()
+            print(f"Database initialized at {db_path}")
+
+        except json.JSONDecodeError as e:
+            print(f"Error parsing JSON: {e}")
+            return
+    else:
+        print("No valid JSON data found in deploy operation.")
+        return
+
+def handle_mint_operation(soup, txid, tx):
+    # Extract title
+    title_tag = soup.find('title')
+    title = title_tag.string if title_tag else 'Untitled'
+    sanitized_title = sanitize_filename(title)
+    config_path = f'./collections/{sanitized_title}.conf'
+
+    if not os.path.exists(config_path):
+        print(f"Configuration file {config_path} does not exist. Skipping mint transaction.")
+        return
+
+    # Extract serial number (sn)
+    sn_meta = soup.find('meta', attrs={'name': 'sn'})
+    sn = sn_meta['content'] if sn_meta else 'Unknown'
+
+    if not is_valid_sn(sn, sanitized_title):
+        print(f"Invalid serial number: {sn}")
+        return
+
+    # Extract parent_inscription_id from config and compare with script src
+    config = configparser.ConfigParser()
+    config.read(config_path)
+    parent_inscription_id = config['DEFAULT'].get('parent_inscription_id', 'Unknown')
+
+    script_tag = soup.find('script', src=True)
+    if script_tag:
+        script_src = script_tag['src']
+        parent_inscription_id_from_script = script_src.split('/')[-1]
+        if parent_inscription_id_from_script != parent_inscription_id:
+            print(f"Parent inscription ID mismatch. Skipping mint transaction.")
+            return
+    else:
+        print("No script tag found in mint operation. Skipping transaction.")
+        return
+
+    # Validate the mint payment
+    mint_price_sats = float(config['DEFAULT'].get('mint_price', '0'))
+    mint_price_btc = Decimal(mint_price_sats) / Decimal(100000000)  # Convert satoshis to bitcoins
+    mint_address = config['DEFAULT'].get('mint_address', 'Unknown')
+
+    # Modify here to skip payment validation if mint_price_btc is zero
+    if mint_price_btc > 0:
+        valid_payment = False
+        for vout in tx['vout']:
+            if 'value' in vout and 'scriptPubKey' in vout and 'addresses' in vout['scriptPubKey']:
+                if Decimal(vout['value']) == mint_price_btc and mint_address in vout['scriptPubKey']['addresses']:
+                    valid_payment = True
                     break
+        if not valid_payment:
+            print(f"Transaction does not pay the mint price of {mint_price_btc} BTC to {mint_address}. Skipping transaction.")
+            return
 
-    if data_string:
-        html_data_base64 = hex_to_base64(data_string)
-        if html_data_base64:
-            html_data_text = base64_to_text(html_data_base64)
-            if html_data_text and '<meta name="p" content="rc001">' in html_data_text:
-                print(f"Decoded HTML text: {html_data_text}")
-                
-                # Use BeautifulSoup to parse the HTML content
-                soup = BeautifulSoup(html_data_text, 'html.parser')
-                
-                # Check for the 'deploy' operation
-                op_meta = soup.find('meta', attrs={'name': 'op', 'content': 'deploy'})
-                if op_meta:
-                    # Extract title
-                    title_tag = soup.find('title')
-                    title = title_tag.string if title_tag else 'Untitled'
-                    
-                    # Check if the configuration file already exists
-                    config_path = f'./{title}.conf'
-                    if os.path.exists(config_path):
-                        print(f"Configuration file {config_path} already exists. Skipping deploy transaction.")
-                        return
-                    
-                    # Extract JSON data
-                    json_script = soup.find('script', attrs={'type': 'application/json', 'id': 'json-data'})
-                    if json_script and json_script.string:
-                        json_string = json_script.string.strip()
-                        print(f"Extracted JSON string before cleaning: {repr(json_string)}")  # Debugging output
-                        
-                        # Replace non-breaking spaces with regular spaces
-                        json_string = json_string.replace('\xa0', ' ')
-                        print(f"Extracted JSON string after cleaning: {repr(json_string)}")  # Debugging output
-                        
-                        try:
-                            json_data = json.loads(json_string)
-                            sn_ranges = json_data.get('sn', [])
-                            mint_address = json_data.get('mint_address', 'Unknown')
-                            mint_price = json_data.get('mint_price', 'Unknown')
-                            parent_inscription_id = json_data.get('parent_inscription_id', 'Unknown')
-                            
-                            # Create configuration file
-                            with open(config_path, 'w') as config_file:
-                                config_file.write('[DEFAULT]\n')
-                                config_file.write(f'mint_address: {mint_address}\n')
-                                config_file.write(f'mint_price: {mint_price}\n')
-                                config_file.write(f'parent_inscription_id: {parent_inscription_id}\n')
-                                config_file.write(f'emblem_inscription_id: {json_data.get("emblem_inscription_id", "Unknown")}\n')
-                                config_file.write(f'website: {json_data.get("website", "Unknown")}\n')
-                                config_file.write(f'deploy_txid: {txid}\n')
-                                config_file.write(f'deploy_address: {inscription_address}\n')
-                                for i, sn in enumerate(sn_ranges):
-                                    config_file.write(f'sn_index_{i}: {sn["range"]}\n')
-                            
-                            print(f"Configuration file created at {config_path}")
+    # Create or connect to SQLite database
+    db_path = f'./collections/{sanitized_title}.db'
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS items (
+                    item_no INTEGER PRIMARY KEY AUTOINCREMENT,
+                    inscription_id TEXT UNIQUE,
+                    sn TEXT UNIQUE,
+                    inscription_status TEXT,
+                    inscription_address TEXT)''')
 
-                            # Initialize the database for the collection
-                            db_path = f'./{title}.db'
-                            conn = sqlite3.connect(db_path)
-                            c = conn.cursor()
-                            c.execute('''CREATE TABLE IF NOT EXISTS items (
-                                            item_no INTEGER PRIMARY KEY AUTOINCREMENT,
-                                            inscription_id TEXT UNIQUE,
-                                            sn TEXT UNIQUE,
-                                            inscription_status TEXT,
-                                            inscription_address TEXT)''')
-                            conn.commit()
-                            conn.close()
-                            print(f"Database initialized at {db_path}")
+    # Check if sn already exists
+    c.execute('SELECT * FROM items WHERE sn=?', (sn,))
+    existing_entry = c.fetchone()
 
-                        except json.JSONDecodeError as e:
-                            print(f"Error parsing JSON: {e}")
-                            return
-                    else:
-                        print("No valid JSON data found.")
-                        return
+    if existing_entry:
+        print(f"Serial number {sn} already exists. Skipping transaction.")
+        conn.close()
+        return
+    else:
+        # Insert new entry
+        inscription_id = f"{txid}i0"
+        # Get inscription address from vout[0]
+        inscription_address = None
+        if tx['vout']:
+            vout0 = tx['vout'][0]
+            if 'scriptPubKey' in vout0 and 'addresses' in vout0['scriptPubKey']:
+                inscription_address = vout0['scriptPubKey']['addresses'][0]
 
-                # Existing mint operation handling
-                op_meta = soup.find('meta', attrs={'name': 'op', 'content': 'mint'})
-                if not op_meta:
-                    print("Operation is not 'mint'. Skipping transaction.")
-                    return
-                
-                # Extract title
-                title_tag = soup.find('title')
-                title = title_tag.string if title_tag else 'Untitled'
-                
-                # Check if the configuration file exists
-                config_path = f'./{title}.conf'
-                if not os.path.exists(config_path):
-                    print(f"Configuration file {config_path} does not exist. Skipping transaction.")
-                    return
-                
-                # Extract serial number (sn)
-                sn_meta = soup.find('meta', attrs={'name': 'sn'})
-                sn = sn_meta['content'] if sn_meta else 'Unknown'
-                
-                # Check if the sn is valid
-                if not is_valid_sn(sn, title):
-                    print(f"Invalid serial number: {sn}")
-                    return
-                
-                # Extract parent_txid from the script tag
-                script_tag = soup.find('script', src=True)
-                if script_tag:
-                    script_src = script_tag['src']
-                    parent_txid_from_script = script_src.split('/')[-1]
-                else:
-                    print("No script tag found. Skipping transaction.")
-                    return
-                
-                # Check if parent_txid from script matches parent_txid in the config file
-                config = configparser.ConfigParser()
-                config.read(config_path)
-                parent_txid = config['DEFAULT'].get('parent_inscription_id', 'Unknown')
-                if parent_txid_from_script != parent_txid:
-                    print(f"Parent txid from script {parent_txid_from_script} does not match parent_txid {parent_txid}. Skipping transaction.")
-                    return
-                
-                # Validate the mint payment
-                mint_price_sats = float(config['DEFAULT'].get('mint_price', '0'))
-                mint_price_btc = mint_price_sats / 100000000  # Convert satoshis to bitcoins
-                mint_address = config['DEFAULT'].get('mint_address', 'Unknown')
-                if mint_price_btc > 0:
-                    valid_payment = False
-                    for vout in decoded_tx['vout']:
-                        if 'value' in vout and 'scriptPubKey' in vout and 'addresses' in vout['scriptPubKey']:
-                            if vout['value'] == mint_price_btc and mint_address in vout['scriptPubKey']['addresses']:
-                                valid_payment = True
-                                break
-                    if not valid_payment:
-                        print(f"Transaction does not pay the mint price of {mint_price_btc} BTC to {mint_address}. Skipping transaction.")
-                        return
-
-                # Create or connect to SQLite database
-                db_path = f'./{title}.db'
-                conn = sqlite3.connect(db_path)
-                c = conn.cursor()
-                c.execute('''CREATE TABLE IF NOT EXISTS items (
-                                item_no INTEGER PRIMARY KEY AUTOINCREMENT,
-                                inscription_id TEXT UNIQUE,
-                                sn TEXT UNIQUE,
-                                inscription_status TEXT,
-                                inscription_address TEXT)''')
-                
-                # Check if sn already exists
-                c.execute('SELECT * FROM items WHERE sn=?', (sn,))
-                existing_entry = c.fetchone()
-
-                if existing_entry:
-                    print(f"Serial number {sn} already exists. Skipping transaction.")
-                    return
-                else:
-                    # Determine the next item_no
-                    c.execute('SELECT COUNT(*) FROM items')
-                    next_item_no = c.fetchone()[0] + 1
-
-                    # Insert new entry with the correct item_no
-                    inscription_id = f"{txid}i0"
-                    c.execute('INSERT INTO items (item_no, inscription_id, sn, inscription_status, inscription_address) VALUES (?, ?, ?, ?, ?)',
-                              (next_item_no, inscription_id, sn, 'minted', inscription_address))
-
-                # Reorder the table to ensure minted items are listed first
-                c.execute('SELECT * FROM items WHERE inscription_status="minted" ORDER BY item_no')
-                minted_items = c.fetchall()
-
-                c.execute('SELECT * FROM items WHERE inscription_status!="minted" ORDER BY item_no')
-                non_minted_items = c.fetchall()
-
-                # Clear the table and reinsert items in the correct order
-                c.execute('DELETE FROM items')
-                for index, item in enumerate(minted_items + non_minted_items, start=1):
-                    c.execute('INSERT INTO items (item_no, inscription_id, sn, inscription_status, inscription_address) VALUES (?, ?, ?, ?, ?)',
-                              (index, item[1], item[2], item[3], item[4]))
-
-                conn.commit()
-                conn.close()
+        c.execute('INSERT INTO items (inscription_id, sn, inscription_status, inscription_address) VALUES (?, ?, ?, ?)',
+                  (inscription_id, sn, 'minted', inscription_address))
+        conn.commit()
+        conn.close()
+        print(f"Minted item with SN {sn} added to database.")
 
 # Main loop to continuously scan for new blocks
-while True:
-    rpc_connection = connect_to_rpc()
-    if rpc_connection is None:
-        time.sleep(60)  # Wait before retrying
-        continue
+def main():
+    last_block_height = load_last_block_height()
+    while True:
+        rpc_connection = connect_to_rpc()
+        if rpc_connection is None:
+            time.sleep(60)  # Wait before retrying
+            continue
 
-    try:
-        current_block_height = rpc_connection.getblockcount()
-        start_block_height = last_block_height + 1
+        try:
+            current_block_height = rpc_connection.getblockcount()
+            start_block_height = last_block_height + 1
 
-        # Process any new blocks
-        for block_height in range(start_block_height, current_block_height + 1):
-            block_hash = rpc_connection.getblockhash(block_height)
-            block = rpc_connection.getblock(block_hash)
-            for txid in block['tx']:
-                process_transaction(txid)
-            update_last_block_height(block_height)
+            # Process any new blocks
+            for block_height in range(start_block_height, current_block_height + 1):
+                block_hash = rpc_connection.getblockhash(block_height)
+                # Fetch block with transactions decoded
+                block = rpc_connection.getblock(block_hash, 2)
+                transactions = block['tx']
+                for tx in transactions:
+                    process_transaction(tx, rpc_connection)
+                update_last_block_height(block_height)
+                last_block_height = block_height
 
-        # Update last_block_height to the current block height
-        last_block_height = current_block_height
+            # Wait for 30 sec before checking for new blocks
+            time.sleep(30)
+        except (BrokenPipeError, JSONRPCException) as e:
+            print(f"RPC error: {e}")
+            time.sleep(1)  # Wait before retrying
+        except Exception as e:
+            print(f"Unexpected error: {e}")
+            time.sleep(1)  # Wait before retrying
 
-        # Wait for 30 sec before checking for new blocks
-        time.sleep(30)
-    except (BrokenPipeError, JSONRPCException) as e:
-        print(f"RPC error: {e}")
-        time.sleep(60)  # Wait before retrying
-    except Exception as e:
-        print(f"Unexpected error: {e}")
-        break
+if __name__ == "__main__":
+    main()
